@@ -1,0 +1,13 @@
+[package]
+name = "isac"
+version = "0.1.0"
+authors = ["Hugues GUILLEUS <ghugues@netc.fr>"]
+edition = "2018"
+default-run = "isac"
+
+[dependencies]
+lazy_static = "1.4.0"
+md-5 = "0.9.1"
+regex = "1"
+separator = "0.4.1"
+ssh2 = "0.8.2"
