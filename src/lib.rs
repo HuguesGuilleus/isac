@@ -2,9 +2,8 @@
 extern crate lazy_static;
 
 use separator::Separatable;
-use ssh2::{FileStat, Session, Sftp};
-use std::ffi::OsStr;
-use std::fs::{create_dir_all, read_dir, File};
+use ssh2::{Session, Sftp};
+use std::fs::{create_dir_all, read_dir, remove_dir_all, File};
 use std::path::PathBuf;
 
 mod addr;
@@ -12,12 +11,18 @@ pub use addr::{addr_from_reader, Addr};
 mod linkvec;
 use linkvec::{linkvec, Couple};
 
+mod metafile;
+use metafile::MetaFile;
+
 pub fn update(a: &Addr) -> Result<(), String> {
     create_dir_all(&a.digest)
         .map_err(|err| format!("Create {:?} directory fail: {}", a.digest, err))?;
-    let sftp = connect(a)?;
 
-    update_dir(&sftp, &PathBuf::from(&a.root), &PathBuf::from(&a.digest))
+    download_dir(
+        &connect(a)?,
+        &PathBuf::from(&a.root),
+        &PathBuf::from(&a.digest),
+    )
 }
 
 fn connect(a: &Addr) -> Result<Sftp, String> {
@@ -34,127 +39,108 @@ fn connect(a: &Addr) -> Result<Sftp, String> {
         .map_err(|err| format!("Open SFTP fail for {}: {}", a, err))
 }
 
-fn update_dir(sftp: &Sftp, remote_dir: &PathBuf, local_dir: &PathBuf) -> Result<(), String> {
-    let raw_remote_list = sftp
+fn download_dir(sftp: &Sftp, remote_dir: &PathBuf, local_dir: &PathBuf) -> Result<(), String> {
+    log("Index", remote_dir, None);
+
+    use std::convert::TryFrom;
+    let remote_list: Vec<MetaFile> = sftp
         .readdir(remote_dir)
-        .map_err(|err| format!("Index {:?} directory fail {}", remote_dir, err))?;
-    let remote_list: Vec<(&OsStr, &FileStat)> = raw_remote_list
+        .map_err(|err| format!("Index remote directory {:?} fail: {}", remote_dir, err))?
         .iter()
-        .filter_map(|(p, stat)| match p.file_name() {
-            Some(n) => Some((n, stat)),
-            None => None,
+        .filter_map(|f| match MetaFile::try_from(f) {
+            Ok(meta) => Some(meta),
+            Err(err) => {
+                eprintln!("ERROR in remote directory {:?}: {} ", remote_dir, err);
+                None
+            }
         })
         .collect();
 
-    let mut local_list: Vec<std::fs::DirEntry> = Vec::new();
-    for r in read_dir(local_dir)
-        .map_err(|err| format!("Err when read directory {:?} {}", local_dir, err))?
-    {
-        local_list
-            .push(r.map_err(|err| format!("Err in reading directory {:?} {}", local_dir, err))?)
-    }
+    let local_list: Vec<MetaFile> = read_dir(local_dir)
+        .map_err(|err| format!("Index local directory {:?} fail: {}", local_dir, err))?
+        .filter_map(|r| match r {
+            Ok(f) => Some(f),
+            Err(err) => {
+                eprintln!("ERROR in locla directory {:?}: {} ", local_dir, err);
+                None
+            }
+        })
+        .filter_map(|f| match MetaFile::try_from(f) {
+            Ok(meta) => Some(meta),
+            Err(err) => {
+                eprintln!("ERROR in remote directory {:?}: {} ", remote_dir, err);
+                None
+            }
+        })
+        .collect();
 
     linkvec(
         remote_list,
-        |(n1, _), (n2, _)| n1.partial_cmp(n2),
+        |f1, f2| f1.partial_cmp(f2),
         local_list,
-        |f1, f2| f1.file_name().partial_cmp(&f2.file_name()),
-        |(n, _), f| n.partial_cmp(&f.file_name()).unwrap(),
+        |f1, f2| f1.partial_cmp(f2),
+        |f1, f2| f1.partial_cmp(f2).unwrap_or(std::cmp::Ordering::Equal),
     )
     .iter()
-    .map(|couple| update_couple(sftp, couple, &remote_dir, &local_dir))
+    .map(|couple| download_couple(sftp, couple, &remote_dir, &local_dir))
     .filter_map(|r| r.err())
     .for_each(|err| eprintln!("\x1b[K\x1b[1;41m ERROR \x1b[0m {}", err));
 
     Ok(())
 }
 
-fn update_couple(
+fn download_couple(
     sftp: &Sftp,
-    couple: &Couple<(&OsStr, &ssh2::FileStat), std::fs::DirEntry>,
+    couple: &Couple<MetaFile, MetaFile>,
     remote_dir: &PathBuf,
     local_dir: &PathBuf,
 ) -> Result<(), String> {
     match couple {
-        (Some((n, stat)), Some(f)) => {
-            let remote_path = &remote_dir.join(n);
-            let p = local_dir.join(f.file_name());
-            match (
-                stat.is_dir(),
-                f.file_type()
-                    .map_err(|err| format!("{} on {:?}", err, &p))?
-                    .is_dir(),
-            ) {
-                (true, true) => update_dir(sftp, &remote_path, &p),
+        (Some(remote), Some(local)) => {
+            let remote_path = remote_dir.join(&remote.name);
+            let local_path = local_dir.join(&local.name);
+            match (remote.dir, local.dir) {
+                (true, true) => download_dir(sftp, &remote_path, &local_path),
                 (true, false) => {
-                    log("rm", &p, None);
-                    std::fs::remove_file(&p)
-                        .map_err(|err| format!("Fail to remove {:?}: {}", &p, err))?;
-                    update_couple(sftp, &(Some((n, stat)), None), remote_dir, local_dir)
+                    log("rm", &local_path, None);
+                    std::fs::remove_file(&local_path)
+                        .map_err(|err| format!("Remove {:?} fail: {}", local_path, err))?;
+                    download_couple(sftp, &(Some(remote.clone()), None), remote_dir, local_dir)
                 }
                 (false, true) => {
-                    log("rmdir", &p, None);
-                    std::fs::remove_dir_all(&p)
-                        .map_err(|err| format!("Fail to remove directory {:?}: {}", &p, err))?;
-                    log("download", &remote_path, stat.size);
-                    update_file(sftp, &remote_path, &p)
+                    log("rmdir", &local_dir, None);
+                    remove_dir_all(&local_path)
+                        .map_err(|err| format!("Remove dir {:?} fail {}", local_path, err))?;
+                    download_file(sftp, &remote_path, &local_path)
                 }
                 (false, false) => {
-                    match (
-                        stat.mtime,
-                        f.metadata()
-                            .map_err(|err| {
-                                format!("Error when get metadata of {:?}: {}", f.file_name(), err)
-                            })?
-                            .modified(),
-                    ) {
-                        (Some(s), Ok(st)) => {
-                            if s > st
-                                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                                .unwrap()
-                                // .unwrap_or(std::time::Duration::zero())
-                                .as_secs()
-                            {
-                                log("download", &remote_path, stat.size);
-                                update_file(sftp, &remote_path, &p)
-                            } else {
-                                log("ok", &remote_path, None);
-                                Ok(())
-                            }
-                        }
-                        _ => {
-                            log("download", &remote_path, stat.size);
-                            update_file(sftp, &remote_path, &p)
-                        }
+                    if remote.mtime < local.mtime {
+                        return Ok(());
                     }
+                    download_file(sftp, &remote_path, &local_path)
                 }
             }
         }
-        (Some((r, stat)), None) => {
-            let local_path = local_dir.join(r);
-            let remote_path = remote_dir.join(r);
-            if stat.is_dir() {
-                log("mkdir", &remote_path, None);
-                std::fs::create_dir(&local_path).map_err(|err| {
-                    format!(
-                        "create the directory {:?} fail: {}\r\n\x1b[1G\x1b[1F",
-                        &local_path, err
-                    )
-                })?;
-                update_dir(sftp, &remote_path, &local_path)
-            } else {
-                log("download", &remote_path, stat.size);
-                update_file(sftp, &remote_path, &local_path)
+        (Some(f), None) => {
+            let remote_path = remote_dir.join(&f.name);
+            let local_path = local_dir.join(&f.name);
+            match f.dir {
+                true => {
+                    log("mkdir", &remote_dir, None);
+                    std::fs::create_dir(&local_path)
+                        .map_err(|err| format!("Make dir {:?} fail {}", local_path, err))?;
+                    download_dir(sftp, &remote_path, &local_path)
+                }
+                false => {
+                    log("download", &remote_path, Some(f.size));
+                    download_file(sftp, &remote_path, &local_path)
+                }
             }
         }
         (None, Some(f)) => {
-            let p = local_dir.join(f.file_name());
+            let p = local_dir.join(&f.name);
             log("rm", &p, None);
-            match f
-                .file_type()
-                .map_err(|e| format!("{} on {:?}", e, &p))?
-                .is_dir()
-            {
+            match f.dir {
                 true => std::fs::remove_dir_all(&p),
                 false => std::fs::remove_file(&p),
             }
@@ -164,13 +150,15 @@ fn update_couple(
     }
 }
 
-fn update_file(sftp: &Sftp, remote_path: &PathBuf, local_path: &PathBuf) -> Result<(), String> {
+fn download_file(sftp: &Sftp, remote_path: &PathBuf, local_path: &PathBuf) -> Result<(), String> {
+    log("download", remote_path, None);
+
     let mut remote_file = sftp
         .open(&remote_path)
-        .map_err(|err| format!("Remote file {:?} fail {}", remote_path, err))?;
+        .map_err(|err| format!("Open remote file {:?} fail {}", remote_path, err))?;
 
     let mut local_file = File::create(&local_path)
-        .map_err(|err| format!("Create local file {:?} fail: {}", &local_path, err))?;
+        .map_err(|err| format!("Create local file {:?} fail {}", local_path, err))?;
 
     std::io::copy(&mut remote_file, &mut local_file)
         .map_err(|err| format!("Copy {:?} fail {}", remote_path, err))?;
