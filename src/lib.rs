@@ -14,6 +14,8 @@ use linkvec::{linkvec, Couple};
 mod metafile;
 use metafile::MetaFile;
 
+type R = Result<(), String>;
+
 struct Assets {
     a: Addr,
     sftp: Sftp,
@@ -59,24 +61,19 @@ impl Assets {
 
         println!("");
     }
+    fn err(&self, err: String) {
+        if self.ansi {
+            eprintln!("\x1b[K\x1b[1;41m       ERROR:\x1b[0m {}", err);
+        } else {
+            eprintln!("       ERROR: {}", err);
+        }
+    }
 }
 
-/* DOWNLOAD */
-
-pub fn donwload(a: Addr, ansi: bool) -> Result<(), String> {
-    create_dir_all(&a.digest)
-        .map_err(|err| format!("Create {:?} directory fail: {}", a.digest, err))?;
-
-    let assets = Assets::new(a, ansi)?;
-
-    download_dir(
-        &assets,
-        &PathBuf::from(&assets.a.root),
-        &PathBuf::from(&assets.a.digest),
-    )
-}
-
-fn download_dir(a: &Assets, remote_dir: &PathBuf, local_dir: &PathBuf) -> Result<(), String> {
+fn compare_dir<M>(a: &Assets, remote_dir: &PathBuf, local_dir: &PathBuf, m: M) -> R
+where
+    M: Fn(&Assets, &Couple<MetaFile>, &PathBuf, &PathBuf) -> R,
+{
     use std::convert::TryFrom;
 
     a.log("index", remote_dir, None);
@@ -89,7 +86,10 @@ fn download_dir(a: &Assets, remote_dir: &PathBuf, local_dir: &PathBuf) -> Result
         .filter_map(|f| match MetaFile::try_from(f) {
             Ok(meta) => Some(meta),
             Err(err) => {
-                eprintln!("ERROR in remote directory {:?}: {} ", remote_dir, err);
+                a.err(format!(
+                    "In indexing remote directory {:?}: {}",
+                    remote_dir, err
+                ));
                 None
             }
         })
@@ -100,14 +100,20 @@ fn download_dir(a: &Assets, remote_dir: &PathBuf, local_dir: &PathBuf) -> Result
         .filter_map(|r| match r {
             Ok(f) => Some(f),
             Err(err) => {
-                eprintln!("ERROR in local directory {:?}: {} ", local_dir, err);
+                a.err(format!(
+                    "In indexing local directory {:?}: {}",
+                    local_dir, err
+                ));
                 None
             }
         })
         .filter_map(|f| match MetaFile::try_from(f) {
             Ok(meta) => Some(meta),
             Err(err) => {
-                eprintln!("ERROR in remote directory {:?}: {} ", remote_dir, err);
+                a.err(format!(
+                    "In indexing local directory {:?}: {}",
+                    local_dir, err
+                ));
                 None
             }
         })
@@ -115,11 +121,143 @@ fn download_dir(a: &Assets, remote_dir: &PathBuf, local_dir: &PathBuf) -> Result
 
     linkvec(remote_list, local_list)
         .iter()
-        .map(|couple| download_couple(a, couple, &remote_dir, &local_dir))
+        .map(|couple| m(a, couple, &remote_dir, &local_dir))
         .filter_map(|r| r.err())
-        .for_each(|err| eprintln!("\x1b[K\x1b[1;41m ERROR \x1b[0m {}", err));
+        .for_each(|err| a.err(err));
 
     Ok(())
+}
+
+/* UPLOAD */
+
+pub fn upload(a: Addr, ansi: bool) -> R {
+    let assets = Assets::new(a, ansi)?;
+
+    upload_dir(
+        &assets,
+        &PathBuf::from(&assets.a.root),
+        &PathBuf::from(&assets.a.digest),
+    )
+}
+
+fn upload_couple(
+    a: &Assets,
+    couple: &Couple<MetaFile>,
+    remote_dir: &PathBuf,
+    local_dir: &PathBuf,
+) -> R {
+    match couple {
+        (Some(remote), Some(local)) => {
+            let r = remote_dir.join(&remote.name);
+            if local.dir != remote.dir {
+                match remote.dir {
+                    true => remove_dir(a, &r)?,
+                    false => a
+                        .sftp
+                        .unlink(&r)
+                        .map_err(|err| format!("Remove {:?} fail {}", &r, err))?,
+                }
+                upload_couple(a, &(None, Some(local.clone())), remote_dir, local_dir)
+            } else {
+                match remote.dir {
+                    true => upload_dir(a, &r, &local_dir.join(&local.name)),
+                    false => {
+                        a.log("keep", &r, Some(remote.size));
+                        Ok(())
+                    }
+                }
+            }
+        }
+        (Some(remote), None) => {
+            let r = remote_dir.join(&remote.name);
+            match remote.dir {
+                true => remove_dir(a, &r),
+                false => {
+                    a.log("rm", &r, None);
+                    a.sftp
+                        .unlink(&r)
+                        .map_err(|err| format!("Remove file {:?} fail {}", r, err))
+                }
+            }
+        }
+        (None, Some(local)) => {
+            let r = remote_dir.join(&local.name);
+            let l = local_dir.join(&local.name);
+            match local.dir {
+                true => {
+                    a.log("mkdir", &r, None);
+                    a.sftp
+                        .mkdir(&r, 0o0777)
+                        .map_err(|err| format!("Make directory {:?} fail {}", &r, err))?;
+                    upload_dir(a, &r, &l)
+                }
+                false => {
+                    a.log("upload", &r, Some(local.size));
+                    upload_file(a, &r, &l)
+                }
+            }
+        }
+        (None, None) => Ok(()),
+    }
+}
+
+fn remove_dir(a: &Assets, remote_dir: &PathBuf) -> R {
+    a.sftp
+        .readdir(&remote_dir)
+        .map_err(|err| format!("Read file (to remove it) {:?} fail {}", &remote_dir, err))?
+        .iter()
+        .map(|(p, stat)| match stat.is_dir() {
+            true => remove_dir(a, &p),
+            false => {
+                a.log("rm", &p, None);
+                a.sftp
+                    .unlink(&p)
+                    .map_err(|err| format!("Remove file {:?} fail {}", &p, err))
+            }
+        })
+        .filter_map(|r| r.err())
+        .for_each(|err| a.err(err));
+
+    a.log("rmdir", &remote_dir, None);
+    a.sftp
+        .rmdir(&remote_dir)
+        .map_err(|err| format!("Remove empty directory {:?} fail {}", &remote_dir, err))
+}
+
+fn upload_dir(a: &Assets, remote_dir: &PathBuf, local_dir: &PathBuf) -> R {
+    compare_dir(a, remote_dir, local_dir, upload_couple)
+}
+
+fn upload_file(a: &Assets, remote_path: &PathBuf, local_path: &PathBuf) -> R {
+    std::io::copy(
+        &mut File::open(local_path)
+            .map_err(|err| format!("Open local file {:?} fail {}", local_path, err))?,
+        &mut a
+            .sftp
+            .create(remote_path)
+            .map_err(|err| format!("Create remote file {:?} fail {:?}", remote_path, err))?,
+    )
+    .map_err(|err| format!("Copy of {:?} fail {}", remote_path, err))
+    .map(|_| ())
+}
+
+/* DOWNLOAD */
+
+pub fn download(a: Addr, ansi: bool) -> R {
+    create_dir_all(&a.digest)
+        .map_err(|err| format!("Create {:?} directory fail: {}", a.digest, err))?;
+
+    let assets = Assets::new(a, ansi)?;
+
+    download_dir(
+        &assets,
+        &PathBuf::from(&assets.a.root),
+        &PathBuf::from(&assets.a.digest),
+    )
+}
+
+fn download_dir(a: &Assets, remote_dir: &PathBuf, local_dir: &PathBuf) -> R {
+    compare_dir(a, remote_dir, local_dir, download_couple)
 }
 
 fn download_couple(
@@ -127,7 +265,7 @@ fn download_couple(
     couple: &Couple<MetaFile>,
     remote_dir: &PathBuf,
     local_dir: &PathBuf,
-) -> Result<(), String> {
+) -> R {
     match couple {
         (Some(remote), Some(local)) => {
             let remote_path = remote_dir.join(&remote.name);
@@ -185,7 +323,7 @@ fn download_couple(
     }
 }
 
-fn download_file(a: &Assets, remote_path: &PathBuf, local_path: &PathBuf) -> Result<(), String> {
+fn download_file(a: &Assets, remote_path: &PathBuf, local_path: &PathBuf) -> R {
     let mut remote_file = a
         .sftp
         .open(&remote_path)

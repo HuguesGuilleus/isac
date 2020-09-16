@@ -8,9 +8,10 @@ fn main() -> finalreturn::R {
             .map_err(|err| format!("Open {:?} fail because: {}", name, err))?,
     )
     .for_each(|a| {
-        println!("\x1b[1;44m CONNECT TO \x1b[0m {}", a);
+        println!("\x1b[1;44m  CONNECT TO \x1b[0m {}", a);
         let before = std::time::Instant::now();
-        match isac::donwload(a, false) {
+		// match isac::download(a, true) {
+        match isac::upload(a, true) {
             Err(err) => eprintln!("Error: {}\r\n", err),
             Ok(()) => println!("Done in {:?}", before.elapsed()),
         }
