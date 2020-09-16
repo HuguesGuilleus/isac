@@ -10,7 +10,7 @@ fn main() -> finalreturn::R {
     .for_each(|a| {
         println!("\x1b[1;44m CONNECT TO \x1b[0m {}", a);
         let before = std::time::Instant::now();
-        match isac::update(&a) {
+        match isac::donwload(&a) {
             Err(err) => eprintln!("Error: {}\r\n", err),
             Ok(()) => println!("Done in {:?}", before.elapsed()),
         }

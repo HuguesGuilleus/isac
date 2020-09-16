@@ -14,7 +14,7 @@ use linkvec::{linkvec, Couple};
 mod metafile;
 use metafile::MetaFile;
 
-pub fn update(a: &Addr) -> Result<(), String> {
+pub fn donwload(a: &Addr) -> Result<(), String> {
     create_dir_all(&a.digest)
         .map_err(|err| format!("Create {:?} directory fail: {}", a.digest, err))?;
 
@@ -40,9 +40,10 @@ fn connect(a: &Addr) -> Result<Sftp, String> {
 }
 
 fn download_dir(sftp: &Sftp, remote_dir: &PathBuf, local_dir: &PathBuf) -> Result<(), String> {
+    use std::convert::TryFrom;
+
     log("Index", remote_dir, None);
 
-    use std::convert::TryFrom;
     let remote_list: Vec<MetaFile> = sftp
         .readdir(remote_dir)
         .map_err(|err| format!("Index remote directory {:?} fail: {}", remote_dir, err))?
@@ -74,24 +75,18 @@ fn download_dir(sftp: &Sftp, remote_dir: &PathBuf, local_dir: &PathBuf) -> Resul
         })
         .collect();
 
-    linkvec(
-        remote_list,
-        |f1, f2| f1.partial_cmp(f2),
-        local_list,
-        |f1, f2| f1.partial_cmp(f2),
-        |f1, f2| f1.partial_cmp(f2).unwrap_or(std::cmp::Ordering::Equal),
-    )
-    .iter()
-    .map(|couple| download_couple(sftp, couple, &remote_dir, &local_dir))
-    .filter_map(|r| r.err())
-    .for_each(|err| eprintln!("\x1b[K\x1b[1;41m ERROR \x1b[0m {}", err));
+    linkvec(remote_list, local_list)
+        .iter()
+        .map(|couple| download_couple(sftp, couple, &remote_dir, &local_dir))
+        .filter_map(|r| r.err())
+        .for_each(|err| eprintln!("\x1b[K\x1b[1;41m ERROR \x1b[0m {}", err));
 
     Ok(())
 }
 
 fn download_couple(
     sftp: &Sftp,
-    couple: &Couple<MetaFile, MetaFile>,
+    couple: &Couple<MetaFile>,
     remote_dir: &PathBuf,
     local_dir: &PathBuf,
 ) -> Result<(), String> {
@@ -111,12 +106,14 @@ fn download_couple(
                     log("rmdir", &local_dir, None);
                     remove_dir_all(&local_path)
                         .map_err(|err| format!("Remove dir {:?} fail {}", local_path, err))?;
+                    log("download", &remote_path, Some(remote.size));
                     download_file(sftp, &remote_path, &local_path)
                 }
                 (false, false) => {
                     if remote.mtime < local.mtime {
                         return Ok(());
                     }
+                    log("download", &remote_path, Some(remote.size));
                     download_file(sftp, &remote_path, &local_path)
                 }
             }
@@ -126,7 +123,7 @@ fn download_couple(
             let local_path = local_dir.join(&f.name);
             match f.dir {
                 true => {
-                    log("mkdir", &remote_dir, None);
+                    log("mkdir", &remote_path, None);
                     std::fs::create_dir(&local_path)
                         .map_err(|err| format!("Make dir {:?} fail {}", local_path, err))?;
                     download_dir(sftp, &remote_path, &local_path)
@@ -144,15 +141,13 @@ fn download_couple(
                 true => std::fs::remove_dir_all(&p),
                 false => std::fs::remove_file(&p),
             }
-            .map_err(|err| format!("rm of {:?} fail: {}", p, err))
+            .map_err(|err| format!("rm of {:?} fail {}", p, err))
         }
         (None, None) => Ok(()),
     }
 }
 
 fn download_file(sftp: &Sftp, remote_path: &PathBuf, local_path: &PathBuf) -> Result<(), String> {
-    log("download", remote_path, None);
-
     let mut remote_file = sftp
         .open(&remote_path)
         .map_err(|err| format!("Open remote file {:?} fail {}", remote_path, err))?;

@@ -1,23 +1,12 @@
-use std::cmp::Ordering;
+use std::cmp::{Ordering, PartialOrd};
 
-pub type Couple<A, B> = (Option<A>, Option<B>);
+pub type Couple<A> = (Option<A>, Option<A>);
 
-pub fn linkvec<A, B, SortA, SortB, E>(
-    mut a: Vec<A>,
-    sort_a: SortA,
-    mut b: Vec<B>,
-    sort_b: SortB,
-    eq: E,
-) -> Vec<Couple<A, B>>
-where
-    SortA: Fn(&A, &A) -> Option<Ordering>,
-    SortB: Fn(&B, &B) -> Option<Ordering>,
-    E: Fn(&A, &B) -> Ordering,
-{
-    a.sort_by(|a, b| sort_a(a, b).unwrap_or(Ordering::Equal).reverse());
-    b.sort_by(|a, b| sort_b(a, b).unwrap_or(Ordering::Equal).reverse());
+pub fn linkvec<A: PartialOrd>(mut a: Vec<A>, mut b: Vec<A>) -> Vec<Couple<A>> {
+    a.sort_by(|a, b| eq(a, b).reverse());
+    b.sort_by(|a, b| eq(a, b).reverse());
 
-    let mut all: Vec<Couple<A, B>> = Vec::with_capacity(a.len() + b.len());
+    let mut all: Vec<Couple<A>> = Vec::with_capacity(a.len() + b.len());
 
     let mut i = a.pop();
     let mut j = b.pop();
@@ -49,27 +38,21 @@ where
 
     all
 }
+fn eq<A: PartialOrd>(a: &A, b: &A) -> std::cmp::Ordering {
+    a.partial_cmp(b).unwrap_or(Ordering::Equal)
+}
 #[test]
 fn test_linkvec() {
     assert_eq!(
-        linkvec(
-            vec![4, 6, 7, 8, 1, 2, 3],
-            |a, b| a.partial_cmp(b),
-            vec![4, 8, 10, 12, 13, 16, 17],
-            |a, b| a.partial_cmp(b),
-            |a: &isize, b: &isize| -> std::cmp::Ordering { (a * 2).partial_cmp(&b).unwrap() },
-        ),
+        linkvec(vec![1, 2, 3, 4, 6], vec![2, 4, 5, 6, 7]),
         vec![
             (Some(1), None),
-            (Some(2), Some(4)),
+            (Some(2), Some(2)),
             (Some(3), None),
-            (Some(4), Some(8)),
-            (None, Some(10)),
-            (Some(6), Some(12)),
-            (None, Some(13)),
-            (Some(7), None),
-            (Some(8), Some(16)),
-            (None, Some(17)),
+            (Some(4), Some(4)),
+            (None, Some(5)),
+            (Some(6), Some(6)),
+            (None, Some(7)),
         ],
     );
 }
