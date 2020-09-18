@@ -1,19 +1,49 @@
 #![feature(termination_trait_lib, process_exitcode_placeholder)]
+use std::path::PathBuf;
+use structopt::StructOpt;
+
+#[derive(StructOpt, Debug)]
+struct Opt {
+    #[structopt(subcommand)]
+    cmd: Command,
+
+    /// The list of remote servers.
+    ///
+    /// The list has the form: `ser@server[:port]/path/to/dir # comment`.
+    /// Blank lines and only comment line are permitted.
+    #[structopt(short, long, default_value = "list")]
+    list: PathBuf,
+
+    /// Disable ANSI char in log.
+    #[structopt(long)]
+    no_ansi: bool,
+}
+
+#[derive(StructOpt, Debug)]
+enum Command {
+    /// Downolad all files (from the server list).
+    Download,
+    /// Upload the files if it no exist on the remote server (from the server list).
+    Upload,
+}
 
 fn main() -> finalreturn::R {
-    let name = "list";
+    let opt = Opt::from_args();
+    let l = &opt.list;
+    let f = match opt.cmd {
+        Command::Download { .. } => isac::download,
+        Command::Upload { .. } => isac::upload,
+    };
 
     isac::addr_from_reader(
-        std::fs::File::open(name)
-            .map_err(|err| format!("Open {:?} fail because: {}", name, err))?,
+        std::fs::File::open(l).map_err(|err| format!("Open {:?} fail because: {}", l, err))?,
     )
     .for_each(|a| {
         println!("\x1b[1;44m  CONNECT TO \x1b[0m {}", a);
         let before = std::time::Instant::now();
-		// match isac::download(a, true) {
-        match isac::upload(a, true) {
+        match f(a.clone(), !opt.no_ansi) {
             Err(err) => eprintln!("Error: {}\r\n", err),
-            Ok(()) => println!("Done in {:?}", before.elapsed()),
+            Ok(()) => println!("Done {} in {:?}", a, before.elapsed()),
         }
     });
 
