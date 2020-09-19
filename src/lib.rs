@@ -97,11 +97,18 @@ pub fn list(a: Addr, ansi: bool) -> R {
 pub fn upload(a: Addr, ansi: bool) -> R {
     let assets = Assets::new(a, ansi)?;
 
-    upload_dir(
-        &assets,
-        &PathBuf::from(&assets.a.root),
-        &PathBuf::from(&assets.a.digest),
-    )
+    let root = PathBuf::from(&assets.a.root);
+    if let Err(e) = assets.sftp.opendir(&root) {
+        if e.code() == -31 {
+			assets.log("mkdir", &root, None);
+            assets
+                .sftp
+                .mkdir(&root, 0o0777)
+                .map_err(|err| format!("make remote root directory {:?} fail {}", root, err))?;
+        }
+    }
+
+    upload_dir(&assets, &root, &PathBuf::from(&assets.a.digest))
 }
 
 fn upload_couple(
