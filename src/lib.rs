@@ -20,6 +20,7 @@ struct Assets {
     a: Addr,
     sftp: Sftp,
     ansi: bool,
+    before: std::time::Instant,
 }
 impl Assets {
     fn new(a: Addr, ansi: bool) -> Result<Assets, String> {
@@ -27,6 +28,7 @@ impl Assets {
             ansi: ansi,
             sftp: Assets::connect(&a)?,
             a: a,
+            before: std::time::Instant::now(),
         })
     }
     fn connect(a: &Addr) -> Result<Sftp, String> {
@@ -42,16 +44,26 @@ impl Assets {
         s.sftp()
             .map_err(|err| format!("Open SFTP fail for {}: {}", a, err))
     }
+    fn ms(&self, op: &str, ms: &str) {
+        if self.ansi {
+            println!(
+                "\x1b[1m{:>12} \x1b[1;34m{:x}\x1b[36m{}\x1b[0m {}",
+                op, self.a, self.a.root, ms
+            )
+        } else {
+            println!("{:>12}: <{:x}> {} {}", op, self.a, self.a.root, ms)
+        }
+    }
     fn log(&self, op: &str, path: &PathBuf, size: Option<u64>) {
         let p = path.to_str().unwrap_or("");
 
         if self.ansi {
             print!(
-                "{:>12}: \x1b[1;34m{}@{}\x1b[36m{}\x1b[0m",
-                op, self.a.user, self.a.host, p
+                "\x1b[1m{:>12} \x1b[1;34m{:x}\x1b[36m{}\x1b[0m",
+                op, self.a, p
             );
         } else {
-            print!("{:>12}: <{}@{}> {}", op, self.a.user, self.a.host, p);
+            print!("{:>12}: <{:x}> {}", op, self.a, p);
         }
 
         match size {
@@ -62,11 +74,23 @@ impl Assets {
         println!("");
     }
     fn err(&self, err: String) {
-        if self.ansi {
-            eprintln!("\x1b[K\x1b[1;41m       ERROR:\x1b[0m {}", err);
-        } else {
-            eprintln!("       ERROR: {}", err);
-        }
+        print_err(err, &self.a, self.ansi);
+    }
+}
+
+pub fn print_err(err: String, a: &Addr, ansi: bool) {
+    match ansi {
+        true => eprintln!(
+            "\x1b[1;31m{:>12} \x1b[1;33m{:x} \x1b[31m{}\x1b[0m",
+            "ERROR", a, err
+        ),
+        false => eprintln!("{:>12}: <{:x}> {}", "ERROR", a, err),
+    }
+}
+
+impl Drop for Assets {
+    fn drop(&mut self) {
+        self.ms("DONE", &format!("in {:?}", self.before.elapsed()))
     }
 }
 
@@ -244,10 +268,10 @@ fn upload_file(a: &Assets, remote_path: &PathBuf, local_path: &PathBuf) -> R {
 /* DOWNLOAD */
 
 pub fn download(a: Addr, ansi: bool) -> R {
-    create_dir_all(&a.digest)
-        .map_err(|err| format!("Create {:?} directory fail: {}", a.digest, err))?;
-
     let assets = Assets::new(a, ansi)?;
+
+    create_dir_all(&assets.a.digest)
+        .map_err(|err| format!("Create {:?} directory fail: {}", &assets.a.digest, err))?;
 
     download_dir(
         &assets,

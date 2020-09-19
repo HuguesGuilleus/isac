@@ -30,6 +30,7 @@ enum Command {
 fn main() -> finalreturn::R {
     let opt = Opt::from_args();
     let l = &opt.list;
+    let ansi = !opt.no_ansi;
     let f = match opt.cmd {
         Command::Download { .. } => isac::download,
         Command::Upload { .. } => isac::upload,
@@ -39,11 +40,8 @@ fn main() -> finalreturn::R {
         std::fs::File::open(l).map_err(|err| format!("Open {:?} fail because: {}", l, err))?,
     )
     .for_each(|a| {
-        println!("\x1b[1;44m  CONNECT TO \x1b[0m {}", a);
-        let before = std::time::Instant::now();
-        match f(a.clone(), !opt.no_ansi) {
-            Err(err) => eprintln!("Error: {}\r\n", err),
-            Ok(()) => println!("Done {} in {:?}", a, before.elapsed()),
+        if let Err(e) = f(a.clone(), ansi) {
+            isac::print_err(e, &a, ansi)
         }
     });
 

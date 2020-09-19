@@ -123,3 +123,25 @@ fn addr_display() {
     a.port = None;
     assert_eq!(&format!("addr: {}", &a), "addr: u@h/home/u/dir/");
 }
+
+impl fmt::LowerHex for Addr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.port {
+            Some(p) => write!(f, "{}@{}:{}", self.user, self.host, p),
+            None => write!(f, "{}@{}", self.user, self.host),
+        }
+    }
+}
+#[test]
+fn addr_display_lower_hex() {
+    let mut a = Addr {
+        user: "u".to_string(),
+        host: "h".to_string(),
+        port: Some(22),
+        root: "/home/u/dir/".to_string(),
+        digest: "".to_string(),
+    };
+    assert_eq!(&format!("addr: {:x}", &a), "addr: u@h:22");
+    a.port = None;
+    assert_eq!(&format!("addr: {:x}", &a), "addr: u@h");
+}
