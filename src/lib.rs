@@ -79,6 +79,10 @@ where
 
 /* PRINT DETAIL */
 
+pub fn connect(a: Addr, ansi: bool) -> R {
+    Assets::new(a, ansi).map(|_| ())
+}
+
 pub fn list(a: Addr, ansi: bool) -> R {
     if ansi {
         println!(
@@ -100,7 +104,7 @@ pub fn upload(a: Addr, ansi: bool) -> R {
     let root = PathBuf::from(&assets.a.root);
     if let Err(e) = assets.sftp.opendir(&root) {
         if e.code() == -31 {
-			assets.log("mkdir", &root, None);
+            assets.log("mkdir", &root, None);
             assets
                 .sftp
                 .mkdir(&root, 0o0777)

@@ -27,6 +27,8 @@ enum Command {
     Upload,
     /// List all addrs (from the server list).
     List,
+    /// Connect to all servers (from the server list).
+    Connect,
 }
 
 fn main() -> finalreturn::R {
@@ -37,6 +39,7 @@ fn main() -> finalreturn::R {
         Command::Download { .. } => isac::download,
         Command::Upload { .. } => isac::upload,
         Command::List { .. } => isac::list,
+        Command::Connect { .. } => isac::connect,
     };
 
     isac::addr_from_reader(

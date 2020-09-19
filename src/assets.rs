@@ -11,10 +11,10 @@ pub struct Assets {
 impl Assets {
     pub fn new(a: Addr, ansi: bool) -> Result<Assets, String> {
         Ok(Assets {
+            before: Instant::now(),
             ansi: ansi,
             sftp: Assets::connect(&a)?,
             a: a,
-            before: Instant::now(),
         })
     }
     pub fn connect(a: &Addr) -> Result<Sftp, String> {
