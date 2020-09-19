@@ -17,7 +17,7 @@ mod assets;
 pub use assets::print_err;
 use assets::Assets;
 
-type R = Result<(), String>;
+pub type R = Result<(), String>;
 
 fn compare_dir<M>(a: &Assets, remote_dir: &PathBuf, local_dir: &PathBuf, m: M) -> R
 where
@@ -73,6 +73,21 @@ where
         .map(|couple| m(a, couple, &remote_dir, &local_dir))
         .filter_map(|r| r.err())
         .for_each(|err| a.err(err));
+
+    Ok(())
+}
+
+/* PRINT DETAIL */
+
+pub fn list(a: Addr, ansi: bool) -> R {
+    if ansi {
+        println!(
+            "\x1b[1m{:>12} \x1b[32m{} \x1b[0m<-> \x1b[1;34m{:x}\x1b[36m{}\x1b[0m",
+            "list", a.digest, a, a.root
+        );
+    } else {
+        println!("{:>12}: {} <-> {}", "list", a.digest, a);
+    }
 
     Ok(())
 }

@@ -25,6 +25,8 @@ enum Command {
     Download,
     /// Upload the files if it no exist on the remote server (from the server list).
     Upload,
+    /// List all addrs (from the server list).
+    List,
 }
 
 fn main() -> finalreturn::R {
@@ -34,6 +36,7 @@ fn main() -> finalreturn::R {
     let f = match opt.cmd {
         Command::Download { .. } => isac::download,
         Command::Upload { .. } => isac::upload,
+        Command::List { .. } => isac::list,
     };
 
     isac::addr_from_reader(
