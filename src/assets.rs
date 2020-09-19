@@ -43,21 +43,19 @@ impl Assets {
     pub fn log(&self, op: &str, path: &PathBuf, size: Option<u64>) {
         let p = path.to_str().unwrap_or("");
 
+        let s = match size {
+            Some(size) => format!(" ({} o)", size.separated_string()),
+            None => format!(""),
+        };
+
         if self.ansi {
-            print!(
-                "\x1b[1m{:>12} \x1b[1;34m{:x}\x1b[36m{}\x1b[0m",
-                op, self.a, p
+            println!(
+                "\x1b[1m{:>12} \x1b[1;34m{:x}\x1b[36m{}\x1b[0m{}",
+                op, self.a, p, s
             );
         } else {
-            print!("{:>12}: <{:x}> {}", op, self.a, p);
+            println!("{:>12}: <{:x}> {}{}", op, self.a, p, s);
         }
-
-        match size {
-            Some(size) => print!(" ({} o)", size.separated_string()),
-            None => {}
-        }
-
-        println!("");
     }
     pub fn err(&self, err: String) {
         print_err(err, &self.a, self.ansi);

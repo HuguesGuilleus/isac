@@ -1,11 +1,15 @@
 #![feature(termination_trait_lib, process_exitcode_placeholder)]
 use std::path::PathBuf;
 use structopt::StructOpt;
+use threadpool::ThreadPool;
 
 #[derive(StructOpt, Debug)]
 struct Opt {
     #[structopt(subcommand)]
     cmd: Command,
+
+    #[structopt(long, default_value = "4")]
+    thread: usize,
 
     /// The list of remote servers.
     ///
@@ -42,14 +46,19 @@ fn main() -> finalreturn::R {
         Command::Connect { .. } => isac::connect,
     };
 
+    let pool = ThreadPool::new(if opt.thread == 0 { 4 } else { opt.thread });
+
     isac::addr_from_reader(
         std::fs::File::open(l).map_err(|err| format!("Open {:?} fail because: {}", l, err))?,
     )
     .for_each(|a| {
-        if let Err(e) = f(a.clone(), ansi) {
-            isac::print_err(e, &a, ansi)
-        }
+        pool.execute(move || {
+            if let Err(e) = f(a.clone(), ansi) {
+                isac::print_err(e, &a, ansi)
+            }
+        })
     });
+    pool.join();
 
     Ok(())
 }
