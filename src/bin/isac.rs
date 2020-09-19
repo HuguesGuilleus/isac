@@ -46,7 +46,13 @@ fn main() -> finalreturn::R {
         Command::Connect { .. } => isac::connect,
     };
 
-    let pool = ThreadPool::new(if opt.thread == 0 { 4 } else { opt.thread });
+    let pool = ThreadPool::new(if let Command::List { .. } = opt.cmd {
+        1
+    } else if opt.thread == 0 {
+        4
+    } else {
+        opt.thread
+    });
 
     isac::addr_from_reader(
         std::fs::File::open(l).map_err(|err| format!("Open {:?} fail because: {}", l, err))?,
