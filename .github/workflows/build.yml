@@ -1,4 +1,4 @@
-name: Build release
+name: Build
 on: release
 
 jobs:
@@ -6,12 +6,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+    - name: Install minimal nightly
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        override: true
+        toolchain: nightly
     - name: Build
-      run: cargo build --release --verbose
+      run: cargo build --release
       env:
         CARGO_TERM_COLOR: always
-      width:
-        toolchain: nightly
+      with:
+        toolchain: +nightly
     - name: Upload Release Asset
       uses: actions/upload-release-asset@v1
       env:
