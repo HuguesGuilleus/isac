@@ -1,6 +1,7 @@
 #![feature(termination_trait_lib, process_exitcode_placeholder)]
 
-use std::path::PathBuf;
+use std::fs::File;
+use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 use threadpool::ThreadPool;
 
@@ -39,6 +40,8 @@ enum Command {
     List,
     /// Connect to all servers (from the server list).
     Connect,
+    /// Init the directory: create key and key.pub if not exist and the list file.
+    Init,
 }
 
 fn main() -> finalreturn::R {
@@ -50,6 +53,7 @@ fn main() -> finalreturn::R {
         Command::Upload { .. } => isac::upload,
         Command::List { .. } => isac::list,
         Command::Connect { .. } => isac::connect,
+        Command::Init { .. } => return init(l, &opt.key),
     };
 
     let key = std::fs::read_to_string("key").ok();
@@ -63,7 +67,7 @@ fn main() -> finalreturn::R {
     });
 
     isac::addr_from_reader(
-        std::fs::File::open(l).map_err(|err| format!("Open {:?} fail because: {}", l, err))?,
+        File::open(l).map_err(|err| format!("Open {:?} fail because: {}", l, err))?,
     )
     .for_each(|a| {
         let key = key.clone();
@@ -74,6 +78,61 @@ fn main() -> finalreturn::R {
         })
     });
     pool.join();
+
+    Ok(())
+}
+
+// Generate teh SSH key + the list of remote servers.
+fn init(list: &PathBuf, keypath: &str) -> finalreturn::R {
+    use osshkeys::{cipher::Cipher, KeyPair, KeyType};
+    use std::io::prelude::*;
+
+    if !list.exists() {
+        println!("Write {:?} servers list", list);
+        File::create(list)
+            .map_err(|err| format!("Create {:?} fail: {}", list, err))?
+            .write_all(b"# Write one server by line with format: 'user@host[:port]/root'\n")
+            .map_err(|err| format!("Write into {:?} fail: {}", list, err))?
+    }
+
+    if !Path::new(keypath).exists() {
+        // Generate the key
+        println!("Generate the key ...");
+        let mut key = KeyPair::generate(KeyType::RSA, 4096)
+            .map_err(|err| format!("Genrate the key fail: {}", err))?;
+
+        let comment = key.comment_mut();
+        comment.push_str("isac@");
+        comment.push_str(
+            hostname::get()
+                .map_err(|err| format!("Fail to get hostname {}", err))?
+                .to_str()
+                .unwrap_or("localhost"),
+        );
+
+        // Private part
+        File::create(keypath)
+            .map_err(|err| format!("Fail to create {:?} {}", keypath, err))?
+            .write_all(
+                key.serialize_openssh(None, Cipher::Null)
+                    .map_err(|err| format!("Fail to serialize the new key {}", err))?
+                    .as_bytes(),
+            )
+            .map_err(|err| format!("Fail to write the key into {:?}: {}", keypath, err))?;
+
+        // Public part
+        let public = key
+            .serialize_publickey()
+            .map_err(|err| format!("Serialize the public part of the new key fail {}", err))?;
+        let p = format!("{}.pub", keypath);
+
+        File::create(&p)
+            .map_err(|err| format!("Fail to create {:?} {}", p, err))?
+            .write_all(public.as_bytes())
+            .map_err(|err| format!("Fail to write the public key into {:?}: {}", p, err))?;
+
+        println!("The new key, public part: \n\n{}\n", public);
+    }
 
     Ok(())
 }

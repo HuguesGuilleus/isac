@@ -6,8 +6,10 @@ edition = "2018"
 default-run = "isac"
 
 [dependencies]
+hostname = "0.3.0"
 lazy_static = "1.4.0"
 md-5 = "0.9.1"
+osshkeys = "0.4.1"
 regex = "1"
 separator = "0.4.1"
 ssh2 = "0.8.2"
