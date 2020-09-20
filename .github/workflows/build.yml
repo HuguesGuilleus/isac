@@ -1,0 +1,19 @@
+name: Build release
+on: release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build
+      run: cargo build --release --verbose
+      env:
+        CARGO_TERM_COLOR: always
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        asset_path: target/release/isac
+        asset_name: isac
