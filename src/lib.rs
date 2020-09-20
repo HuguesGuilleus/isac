@@ -16,6 +16,7 @@ use metafile::MetaFile;
 mod assets;
 pub use assets::print_err;
 use assets::Assets;
+pub use assets::Key;
 
 pub type R = Result<(), String>;
 
@@ -79,11 +80,11 @@ where
 
 /* PRINT DETAIL */
 
-pub fn connect(a: Addr, ansi: bool) -> R {
-    Assets::new(a, ansi).map(|_| ())
+pub fn connect(a: Addr, ansi: bool, key: Key) -> R {
+    Assets::new(a, ansi, key).map(|_| ())
 }
 
-pub fn list(a: Addr, ansi: bool) -> R {
+pub fn list(a: Addr, ansi: bool, _: Key) -> R {
     if ansi {
         println!(
             "\x1b[1m{:>12} \x1b[32m{} \x1b[0m<-> \x1b[1;34m{:x}\x1b[36m{}\x1b[0m",
@@ -98,8 +99,8 @@ pub fn list(a: Addr, ansi: bool) -> R {
 
 /* UPLOAD */
 
-pub fn upload(a: Addr, ansi: bool) -> R {
-    let assets = Assets::new(a, ansi)?;
+pub fn upload(a: Addr, ansi: bool, key: Key) -> R {
+    let assets = Assets::new(a, ansi, key)?;
 
     let root = PathBuf::from(&assets.a.root);
     if let Err(e) = assets.sftp.opendir(&root) {
@@ -218,8 +219,8 @@ fn upload_file(a: &Assets, remote_path: &PathBuf, local_path: &PathBuf) -> R {
 
 /* DOWNLOAD */
 
-pub fn download(a: Addr, ansi: bool) -> R {
-    let assets = Assets::new(a, ansi)?;
+pub fn download(a: Addr, ansi: bool, key: Key) -> R {
+    let assets = Assets::new(a, ansi, key)?;
 
     create_dir_all(&assets.a.digest)
         .map_err(|err| format!("Create {:?} directory fail: {}", &assets.a.digest, err))?;

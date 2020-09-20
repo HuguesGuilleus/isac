@@ -1,4 +1,5 @@
 #![feature(termination_trait_lib, process_exitcode_placeholder)]
+
 use std::path::PathBuf;
 use structopt::StructOpt;
 use threadpool::ThreadPool;
@@ -8,6 +9,11 @@ struct Opt {
     #[structopt(subcommand)]
     cmd: Command,
 
+    // The key file, if it doesn't exist, the SSH Agent will be used.
+    #[structopt(long, default_value = "key")]
+    key: String,
+
+    /// The max number of working thread.
     #[structopt(long, default_value = "4")]
     thread: usize,
 
@@ -46,6 +52,8 @@ fn main() -> finalreturn::R {
         Command::Connect { .. } => isac::connect,
     };
 
+    let key = std::fs::read_to_string("key").ok();
+
     let pool = ThreadPool::new(if let Command::List { .. } = opt.cmd {
         1
     } else if opt.thread == 0 {
@@ -58,8 +66,9 @@ fn main() -> finalreturn::R {
         std::fs::File::open(l).map_err(|err| format!("Open {:?} fail because: {}", l, err))?,
     )
     .for_each(|a| {
+        let key = key.clone();
         pool.execute(move || {
-            if let Err(e) = f(a.clone(), ansi) {
+            if let Err(e) = f(a.clone(), ansi, key) {
                 isac::print_err(e, &a, ansi)
             }
         })

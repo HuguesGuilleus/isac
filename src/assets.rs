@@ -2,6 +2,8 @@ use super::{Addr, PathBuf, Session, Sftp};
 use separator::Separatable;
 use std::time::Instant;
 
+pub type Key = Option<String>;
+
 pub struct Assets {
     pub a: Addr,
     pub sftp: Sftp,
@@ -9,23 +11,30 @@ pub struct Assets {
     pub before: Instant,
 }
 impl Assets {
-    pub fn new(a: Addr, ansi: bool) -> Result<Assets, String> {
+    pub fn new(a: Addr, ansi: bool, key: Key) -> Result<Assets, String> {
         Ok(Assets {
             before: Instant::now(),
             ansi: ansi,
-            sftp: Assets::connect(&a)?,
+            sftp: Assets::connect(&a, key)?,
             a: a,
         })
     }
-    pub fn connect(a: &Addr) -> Result<Sftp, String> {
+    pub fn connect(a: &Addr, key: Key) -> Result<Sftp, String> {
         let mut s = Session::new()
             .map_err(|err| format!("The creation of a new SSH session fail: {}", err))?;
         s.set_compress(true);
         s.set_tcp_stream(a.connect()?);
         s.handshake()
             .map_err(|err| format!("SSH Handshake fail for {}: {}", a, err))?;
-        s.userauth_agent(&a.user)
-            .map_err(|err| format!("Authentification fail for {}: {}", a, err))?;
+
+        match key {
+            Some(k) => s
+                .userauth_pubkey_memory(&a.user, None, &k, None)
+                .map_err(|err| format!("Authentification with key fail: {}", err))?,
+            None => s
+                .userauth_agent(&a.user)
+                .map_err(|err| format!("Authentification fail for {}: {}", a, err))?,
+        };
 
         s.sftp()
             .map_err(|err| format!("Open SFTP fail for {}: {}", a, err))
