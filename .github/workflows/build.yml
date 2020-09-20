@@ -10,6 +10,8 @@ jobs:
       run: cargo build --release --verbose
       env:
         CARGO_TERM_COLOR: always
+      width:
+        toolchain: nightly
     - name: Upload Release Asset
       uses: actions/upload-release-asset@v1
       env:
